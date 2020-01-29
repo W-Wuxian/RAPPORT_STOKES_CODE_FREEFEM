@@ -1,0 +1,107 @@
+include "cylindre2.idp"
+load "iovtk"
+
+
+// Espaces de résolution
+
+//fespace VVh(Th,[P1b,P1b,P1b]);
+fespace VVh(Th,[P2,P2,P2]);
+fespace QQh(Th,P1);
+
+//Définition des opérateurs utiles à la résolution
+macro Grad(u) [dx(u),dy(u),dz(u)] // EOM
+macro div(u1,u2,u3) (dx(u1)+dy(u2)+dz(u3))  //EOM
+
+real nu = 1.0;
+real L = 4.0;        //a modifier dans cylindre2.idp :=zbound[0,L]
+real Rayon = 1.0;    //Rayon du cylindre
+real CLZ;           // CL sur u3 (dirichlet homogene) en z=0 si on veut faire le test du debit(cf projet) 
+real cstpression;   //a calculer analytiquement pour avoir pression moyenne nulle
+// Variables à résoudre dans le calcul
+VVh [u1,u2,u3], [v1,v2,v3];
+QQh p, q;
+
+// Variables solution exacte
+func ue1 = 0.0;
+func ue2 = 0.0;
+func ue3 = 1-x*x-y*y;
+cstpression = 2*L; //VIA etude theorique
+func pe = -4*z+cstpression;//VIA etude theorique
+VVh [u1exa,u2exa,u3exa];
+[u1exa,u2exa,u3exa] = [0.0,0.0,1-x*x-y*y];
+
+// Définition du terme source
+real f = 0.0;
+// Coeff penalisation
+real pena = 1e-7;
+//CLZ:
+CLZ = 1.0-(0.5*Rayon*Rayon);// ==0.5 car Rayon=1
+
+/*******************************************************************
+                RÉSOLUTION DU PROBLÈME VARIATIONNEL
+********************************************************************/
+real tmps1,tmps2; //temps de calcul
+               /*   MÉTHODE DE PÉNALISATION   */
+p = 0;
+// //Problème Variationnel
+//GMRES,eps=1e-6,nbiter=2*VVh.ndof+2*QQh.ndof,dimKrylov=VVh.ndof
+tmps1 = clock();
+ solve Stokes([u1,u2,u3,p],[v1,v2,v3,q],solver=UMFPACK) =
+   int3d(Th)( nu*(Grad(u1)'*Grad(v1) +  Grad(u2)'*Grad(v2) +  Grad(u3)'*Grad(v3))
+                   - div(u1,u2,u3)*q - div(v1,v2,v3)*p - pena*q*p )
+   +int3d(Th)(-f*(v1+v2+v3))
+   +on(3,u1=0.0,u2=0.0,u3 = ue3,p=pe) //Contour cylindre vitesse nulle
+   +on(2,u1=0.0,u2=0.0,u3 = ue3,p=pe) //Entrée
+   +on(1,u1=0.0,u2=0.0,u3 = ue3,p=pe); //Sortie
+tmps2 = clock();
+
+
+
+               /*  ÉCRITURE FICHIERS  */
+
+// Écriture de la solution au format .vtk
+//int[int] Order = [1];
+//string DataName = "U";
+//savevtk("u1.vtk",Th,u1, dataname=DataName, order=Order);
+// savevtk("u2.vtk",Th,u2, dataname=DataName, order=Order);
+// savevtk("u3.vtk",Th,u3, dataname=DataName, order=Order);
+//savevtk("press.vtk",Th,p, dataname=DataName, order=Order);
+
+/*******************************************************************
+              CALCUL DES ERREURS ET AFFICHAGE DES SORTIES
+********************************************************************/
+
+  real normeL2vit, errL2vit, normeL2press, errL2press;
+  //Pour la vitesse
+
+  normeL2vit = 0.0;
+  errL2vit = 0.0;
+  //le calcul de norme:
+  for(int i=0; i<u3.n-2;i=i+3){//i=i+3 car la solution sur toutes les composantes est save dans la compo u3.
+      normeL2vit = normeL2vit + (0.0)^2 + (0.0)^2 + (u3exa[][i+2])^2 ;
+      errL2vit   = errL2vit   + (u1[][i]-0.0)^2   + (u2[][i+1]-0.0)^2 + (u3[][i+2]-u3exa[][i+2])^2;
+      //cout<< "u1 "<<u1[][i]<< " u2 "<<u2[][i+1]<< " u3 "<<u3[][i+2]<<" u3exa "<<u3exa[][i+2]<<endl;
+  }
+  normeL2vit = sqrt( int3d(Th) ( normeL2vit) );
+  errL2vit   = sqrt( int3d(Th) ( errL2vit ) );
+
+
+  //Pour la pression
+  normeL2press = sqrt( int3d(Th) ( (pe)^2 ));
+  errL2press   = sqrt( int3d(Th) ( (p-pe)^2 ) );
+  cout << "NDOF " << VVh.ndof+QQh.ndof << " VVh.NDOF " << VVh.ndof << " u1.n " << u1.n << endl;
+  cout << "ERR L2 RELATIVE VITESSE =" << errL2vit/normeL2vit << endl;
+  cout << "ERR L2 RELATIVE PRESSION =" << errL2press/normeL2press << endl;
+  cout << "TEMPS DE CALCUL en Sec "<< tmps2-tmps1<<" deb out "<< int2d(Th,1)(u3)*(pi*Rayon*Rayon) << endl;
+  //string DataName2 = "P";
+  //savevtk("vitesse.vtk", Th,u3, dataname=DataName2, order=Order);
+  medit("vit",Th,u3);
+  medit("Press",Th,p);
+  /*
+  POUR VISUALISER AVEC MEDIT:
+  cliquer sur la fenetre
+  faire au clavier
+  m pour les couleurs
+  B (maj+b), puis G(maj+g) et A(maj+a) pour boxe grille  axe
+  fn F1 pour une coupe
+  */

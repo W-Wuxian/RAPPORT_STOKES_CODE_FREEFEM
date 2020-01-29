@@ -1,0 +1,23 @@
+
+
+load "tetgen"
+load "msh3"// buildlayer
+load "medit"// buildlayer
+
+
+
+border a(t=0,2*pi){x=cos(t);y=sin(t);label=1;};//label=1;
+mesh T2d=buildmesh(a(40));//30, ATTENTION NE PAS ALLER A PLUS DE 40
+int[int] rup = [0, 1];
+int[int] rdo = [0, 2];
+int[int] rmid = [1, 3];//, 1, 3, 1, 3, 1, 3];
+// ATTENTION NE PAS ALLER A PLUS DE 15
+mesh3 Th=buildlayers(T2d,15,zbound=[0,4.0],labeldown=rdo,labelup=rup, labelmid=rmid);//15
+//medit("Cyl",Th,wait=1);
+exec("rm Cyl.bb Cyl.faces Cyl.points");
+
+
+
+
+  //Afichage du cube généré avec medit pour vérifier
+  //medit("Cylinder", Th);

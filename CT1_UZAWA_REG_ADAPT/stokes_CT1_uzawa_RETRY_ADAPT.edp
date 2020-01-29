@@ -1,0 +1,134 @@
+/*******************************************************************
+                  DÉFINITION DES ESPACES ET DES VARIABLES
+********************************************************************/
+//load "Element_Mixte"
+/* -Delta u + gradP = 0
+ div u =0 */
+
+   //Définition des opérateurs utiles à la résolution
+   macro Grad(u) [dx(u),dy(u)] //EOM
+   macro Div(u1,u2) (dx(u1)+dy(u2))  //EOM
+
+  int k=2;
+  int PTEDGE=10*2^k;								//POINTS SEED PAR COTE DU MESH
+  //	***	DEFINE MESH BY BORDER THEN BY BUILD:
+  mesh Th;                                     	// SIMILI OF REF TRIANGULAR MESH
+  border LOW(t=0,1) {x=t;y=0;label=1;};           // LOWER BORDER
+  border DIAG(t=1,0) {x=t;y=1-t;label=2;};        // DIAG BORDER
+  border LEFT(t=1,0) {x=0;y=t;label=3;};          // LEFT BORDER
+  Th=buildmesh( LOW(PTEDGE) + DIAG(PTEDGE+PTEDGE/3) + LEFT(PTEDGE) );
+  real AreaDomain=Th.area;
+
+
+  real alpha = 1;
+  real nu=1.0; //VISCOSITE DYNAMIQUE
+
+  fespace Uh(Th,[P2,P2]);  // fonction space for  u=(u1,u2)
+  fespace Ph(Th,P1);       // function space for p
+  fespace Ph0(Th,P0);
+
+  Uh [u1,u2],[v1,v2],[usave1,usave2];
+  Ph p, q;
+  Uh [uh1,uh2],[uvisu1,uvisu2];
+  Ph ph,pvisu;
+
+  // analytic solution
+  real beta = 0.44;
+  func ue1= x;
+  func ue2= -y;
+  func pe= x+y-(2./3.);
+  func dxue1= 1.0;
+  func dyue1= 0.0;
+  func dxue2= 0.0;
+  func dyue2= -1.0;
+  func f1= 1;
+  func f2= 1;
+
+  [uvisu1,uvisu2]=[ue1,ue2];
+  pvisu=pe;
+  fespace Vh(Th,[P2,P2]);
+  Vh [s1,s2];
+  [s1,s2]=[x,-y];
+
+//MESH ADAPT DONC ON DOIT RECONSTRUIRE LES MATRICES A CHAQUE ADAPTATION:
+macro buildmat(){
+  varf a([u1,u2],[v1,v2])=int2d(Th)(Grad(u1)'*Grad(v1)+Grad(u2)'*Grad(v2))+int2d(Th)(f1*v1+f2*v2)
+  +on(1,2,3,u1=ue1,u2=ue2);
+  varf bc1([u1,u2],[v1,v2])=on(1,2,3,u1=1,u2=1);
+  varf b([u1,u2],[q])= int2d(Th)(Div(u1,u2)*q);
+  varf c([p],[q])=int2d(Th)(p*q);
+  matrix A=a(Uh,Uh,tgv=-1,solver=GMRES);
+  matrix B=b(Uh,Ph);
+  matrix Bt=B';
+  matrix C=c(Ph,Ph,solver=CG);
+  real[int] F=a(0,Uh,tgv=-1);
+  real[int] BC=bc1(0,Uh,tgv=-1);
+  Uh [b1,b2];
+  }//
+
+  //CONSTRUCTION INITIALE:
+  varf a([u1,u2],[v1,v2])=int2d(Th)(Grad(u1)'*Grad(v1)+Grad(u2)'*Grad(v2))+int2d(Th)(f1*v1+f2*v2)
+  +on(1,2,3,u1=ue1,u2=ue2);
+  varf bc1([u1,u2],[v1,v2])=on(1,2,3,u1=1,u2=1);
+  varf b([u1,u2],[q])= int2d(Th)(Div(u1,u2)*q);
+  varf c([p],[q])=int2d(Th)(p*q);
+  matrix A=a(Uh,Uh,tgv=-1,solver=GMRES);
+  matrix B=b(Uh,Ph);
+  matrix Bt=B';
+  matrix C=c(Ph,Ph,solver=CG);
+  real[int] F=a(0,Uh,tgv=-1);
+  real[int] BC=bc1(0,Uh,tgv=-1);
+  Uh [b1,b2];
+
+  func real[int] DJ(real[int] &u)
+  {
+  real[int] Au=A*u;
+  return Au; // return of global variable ok
+  };
+
+
+  p=0;
+  real epsgc= 1e-10;
+  // Uzawa iteration
+  int inumOuter=0;
+  while(inumOuter<500){  //A AUGMENTER SI BESOIN DE PRECISION
+
+    b1[]=Bt*p[];  	b1[]+=F;   // second member  Au=Btu+F
+  	b1[]= BC ? F : b1[];
+  	u1[]= BC? F: u1[];
+
+  	LinearCG(DJ,u1[],b1[],veps=epsgc,nbiter=2000,verbosity=0);
+  	epsgc=-abs(epsgc);
+
+  	real[int] Bu1=B*u1[];
+  	Bu1*=alpha;
+  	real normBu1=sqrt(Bu1'*Bu1);
+  	if (normBu1<1e-10) break;
+
+  	// update for p
+  	real[int] ptemp(p[].n);
+  	ptemp=C^-1*Bu1;  // C p^{k+1}=C p^{k} - alpha Bu
+  	p[]-=ptemp;
+  	p[]-=int2d(Th)(p)/AreaDomain;
+    cout<< "inumOuter "<<inumOuter<<" Uh.ndof "<<Uh.ndof<<" u1.n "<<u1.n<<endl;
+    //ON ADAPT TOUTE LES 10 ITERATIONS, ET ON REBUILD LES MATRICES
+    if(inumOuter%10==0){Th = adaptmesh(Th,[u1,u2],p,err=0.001);plot(Th);buildmat}
+  	inumOuter++;
+  }
+  ph=p;
+  [uh1,uh2]=[u1,u2];     // save the solution of exact uzawa method
+
+    real normeL2vit, errL2vit;
+    normeL2vit =  sqrt( int2d(Th) ( (ue1)^2+(ue2)^2) );//= sqrt( int3d(Th) (normeL2vit ) );
+    errL2vit   = sqrt( int2d(Th)  ( (u1-ue1)^2+(u2-ue2)^2) ); //sqrt( int3d(Th) ((errL2vit)^2 ) )
+    real NPL2,EPL2;
+    NPL2 = sqrt(int2d(Th) (pe^2) );
+    EPL2 = sqrt(int2d(Th) ((p-pe)^2) );
+  cout << "ERR L2 RELATIVE VITESSE =" << errL2vit/normeL2vit<<" "<<u1.n<<" "<<Th.nv<<" "<<Th.nt << endl;
+  cout << "ERR L2 RELATIVE PRESSION=" << EPL2/NPL2 <<endl;
+  plot([u1,u2],p,wait=true,value=1,fill=0,ps="numericalsolutionu.eps",cmm="Numerical solution uh, ph");
+ofstream ufile("V.txt");
+
+for(int i=0;i<u1.n;i+=2){
+ufile <<u1[][i]<<" "<<s1[][i]<<" "<<u1[][i+1]<<" "<<s1[][i+1]<<endl;
+}

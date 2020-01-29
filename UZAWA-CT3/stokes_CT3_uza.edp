@@ -1,0 +1,189 @@
+/*          RÉSOLUTION DE L'ÉQUATION DE STOKES STATIONNAIRE
+          SUR UN CYLINDRE AVEC LA MÉTHODE D'UZAWA
+                     -Delta u + gradP = 0
+                            div u =0                               */
+/*******************************************************************
+                  DÉFINITION DES ESPACES ET DES VARIABLES
+********************************************************************/
+/*   MODULES */
+ include "cylindre2.idp"
+ load "iovtk"
+ //ofstream afile("CT3_uzawa.txt");
+
+
+// Définition des éléments finis utilisés:
+fespace VVh(Th,[P2,P2,P2]); //Pour la vitesse
+fespace QQh(Th,P1); // Pour la pression
+
+
+//Définition des opérateurs utiles à la résolution
+macro Grad(u) [dx(u),dy(u),dz(u)] //
+macro div(u1,u2,u3) (dx(u1)+dy(u2)+dz(u3))  //
+
+real nu=1.0; //VISCOSITE DYNAMIQUE
+
+VVh [u1,u2,u3], [v1,v2,v3];  //vecteurs vitesse et vecteurs vitesse tests
+QQh p, q;          //vecteur pression et pression tests
+
+//Définition des vitesses et pression analytiques pour le cas test
+func ue1=0.;
+func ue2=0.;
+func ue3=1.-x*x-y*y;
+
+real L=5.0;//SI modification de L, pensez a aussi modifier zbound[0,L] dans le .idp
+real Rayon=1.0;
+real cstpression=2.*L;
+func pe=-4.*z+cstpression;
+
+//Définition du second membre de l'équation de Stokes
+func f=0.;
+func CLZ=1-0.5*Rayon*Rayon;//=0.5; car rayon=1//SI ON VEUT METTRE UNE VITESSE CST EN Z=0 CF PROJET
+
+
+ /********************************************************************
+            Assemblage matrices problème général + fonctions
+  ********************************************************************/
+
+//----------Création de la matrice A du problème (vitesse)
+varf aaa([u1, u2, u3], [v1, v2, v3])=
+int3d(Th)(nu*( Grad(u1)'*Grad(v1) +  Grad(u2)'*Grad(v2) + Grad(u3)'*Grad(v3) ))
++int3d(Th)(f*(v1+v2+v3))
++ on(1,u1=0.0,u2=0.0,u3=ue3)         //z=L sortie
++ on(3,u1=0.0,u2=0.0,u3=ue3)         //r=R latéral
++ on(2,u1=0.0,u2=0.0,u3=ue3);        //z=0 entrée
+// pour les CL issues du calcul du debit faire:
+/*+ on(1,u1=0.0,u2=0.0)         //z=L sortie
++ on(3,u1=0.0,u2=0.0,u3=ue3)         //r=R latéral
++ on(2,u1=0.0,u2=0.0,u3=CLZ);        //z=0 entrée*/
+
+matrix AA = aaa(VVh, VVh, solver=GMRES, tgv=-1); //matrice A du PB VAR
+
+//----------Conditions aux limites pour les vitesses
+varf bc1([u1, u2, u3], [v1, v2, v3])=on(1,2,3,u1=1,u2=1,u3=1);
+
+
+//----------Matrice de masse
+varf massp(p,q) = int3d(Th)(p * q);
+matrix Mp = massp(QQh, QQh, solver=CG);
+
+//----------Conditions aux limites + forces exterieures
+real[int] F=aaa(0,VVh,tgv=-1), G=bc1(0,VVh,tgv=-1);
+
+//----------Création de la matrice B pour le PB VAR
+varf bbb([u1,u2,u3], [q]) = int3d(Th)(div(u1,u2,u3)*q );
+matrix DB = bbb(VVh,QQh); // La matrice B du PB VAR
+matrix DBT = DB'; //B transposée
+
+VVh [b1,b2,b3]; // vecteur pour les conditions aux limites
+
+//----------Conditions aux limites
+real[int] bbc = aaa(0, VVh ,tgv=-1);    // Dirichlet
+
+//---------Fonction d'appel pour le GC
+func real[int] DJ(real[int] &u){
+  real[int] au=AA*u;
+  return au;
+
+
+}
+//--------Intialisation pour la pression et résolution système linéaire
+p[]=0.;
+real rayon=1.;
+real areadomain = pi*rayon*rayon*L;
+int inumouter=0;
+real epsgc=1e-10;
+real norm=1.;
+
+/********************************************************************
+              BOUCLE RÉSOLUTION CG + CALCUL DE P AVEC UZAWA
+ ********************************************************************/
+real t1,t2;
+t1=clock();
+while (inumouter<2000){//AUGMENTER LA BORNE DE inumouter POUR UNE MEILLEUR CONVERGENCE
+  cout << inumouter << endl;
+  //calcul second membre
+  b1[]=DBT*p[];
+  b1[]+=F;
+  //switch second membre
+  b1[]=G ? F : b1[];
+  u1[]=G ? F : u1[];
+
+
+//resolution de la vitesse:
+LinearCG(DJ, u1[],b1[],veps=epsgc,nbiter=2*(VVh.ndof+QQh.ndof),eps=1e-12,
+verbosity=5);
+epsgc=-abs(epsgc);
+
+real[int] bu1=DB*u1[];//DIVERGENCE VITESSE
+real alpha=1.;
+bu1*=alpha;//alpha=1/(1+Rbeta), ici Rbeta=1
+real normbu1=sqrt(bu1'*bu1);
+norm=normbu1;
+
+if (normbu1<1e-10){//condition sur la norme de la divergence, possibilité de la diminuer ex:1e-12
+  break;
+}
+//resolution pour la pression:
+real[int] ptemp(p[].n);
+ptemp=Mp^-1*bu1;
+p[]-=ptemp;
+p[]-=int3d(Th)(p)/areadomain;
+inumouter++;
+}
+t2=clock();
+/*******************************************************************
+              CALCUL DES ERREURS ET AFFICHAGE DES SORTIES
+********************************************************************/
+
+  real normeL2vit, errL2vit;
+  real normeL2press, errL2press;
+  //Pour la vitesse
+  normeL2vit =  sqrt( int3d(Th) ( (ue1)^2+(ue2)^2+(ue3)^2) );
+  errL2vit   = sqrt( int3d(Th)  ( (u1-ue1)^2+(u2-ue2)^2+(u3-ue3)^2) );
+  //Pour la pression
+  normeL2press = sqrt( int3d(Th) ( (pe)^2 ));
+  errL2press   = sqrt( int3d(Th) ( (p-pe)^2 ) );
+
+  //AFFICHAGE DES ERREURS À L'ECRAN
+  cout <<"********************************************************************"<<endl;
+  cout << "ERR L2 RELATIVE VITESSE ALL DOMAINE =" << errL2vit/normeL2vit << endl;
+  cout << "ERR L2 RELATIVE PRESSION ALL DOMAINE =" << errL2press/normeL2press << endl;
+  cout << "TEMPS " << t2-t1 << " ndof " <<  VVh.ndof+QQh.ndof  <<" DEBIT OUT " << int2d(Th,1)(u3)*pi*Rayon*Rayon<< endl;
+  cout << " DEBIT IN " << int2d(Th,2)(u3)*pi*Rayon*Rayon  <<" DEBIT OUT " << int2d(Th,1)(u3)*pi*Rayon*Rayon<< endl;
+  cout <<"********************************************************************"<<endl;
+  cout <<"********************************************************************"<<endl;
+  //pour z=L:
+  //Pour la vitesse SUR LA FACE z=L
+  normeL2vit =  sqrt( int2d(Th,1) ( (ue1)^2+(ue2)^2+(ue3)^2) );
+  errL2vit = sqrt( int2d(Th,1)  ( (u1-ue1)^2+(u2-ue2)^2+(u3-ue3)^2) );
+  //Pour la pression SUR LA FACE z=L
+  normeL2press = sqrt( int2d(Th,1) ( (pe)^2 ));
+  errL2press = sqrt( int2d(Th,1) ( (p-pe)^2 ) );
+  cout <<"********************************************************************"<<endl;
+  cout << "ERR L2 RELATIVE VITESSE EN Z=L = " << errL2vit/normeL2vit << endl;
+  cout << "ERR L2 RELATIVE PRESSION EN Z=L = " << errL2press/normeL2press << endl;
+  cout <<"********************************************************************"<<endl;
+  //afile << VVh.ndof+QQh.ndof << " "<< errL2vit/normeL2vit << " "<< errL2press/normeL2press << " "<< t2-t1 <<  endl;
+
+// mesh cut=square(nb,nb,[x,y]);
+// fespace Vcut(cut,P2);
+// Vcut ux=u1(x,0.5,y);
+// Vcut uz=u3(x,0.5,y);
+// Vcut p2=p(x,0.5,y);
+
+//plot([ux,uz],value=true,cmm="cut y=1");
+
+//}
+
+/********************************************************************
+ÉCRITURE DES FICHIERS SOLUTIONS AU FORMAT VTK
+********************************************************************/
+// int[int] Order = [1];
+// string DataName = "Vitesse";
+// savevtk("vit.vtk", Th,[u1,u2,u3], dataname=DataName, order=Order);
+// DataName="Pression";
+// savevtk("p.vtk", Th, p, dataname=DataName, order=Order);
+
+//AFFICHAGE DES SOLUTIONS FINALES SUR LE MAILLAGE AVEC MEDIT
+ medit("vit",Th,u3);
+ medit("p",Th,p);
