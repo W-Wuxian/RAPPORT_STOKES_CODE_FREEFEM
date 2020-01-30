@@ -12,7 +12,7 @@ CT1_UZAWA_REG_ADAPT  POUR LE CAS 1 PAR UZAWA METHOD AVEC ET SANS ADAPTATION DE M
 CT3_PENA  POUR LE CAS 3 PAR PENALISATION
 UZAWA-CT3 POUR LE CAS 3 PAR UZAWA METHOD
 ****************************************************************************************
-CAS 2 :
+CT2_UZAWA_PENALISATION POUR LE CAS 2 UZAWA ET PENALISATION
 ****************************************************************************************
 
 POUR VISUALISER AVEC MEDIT:
