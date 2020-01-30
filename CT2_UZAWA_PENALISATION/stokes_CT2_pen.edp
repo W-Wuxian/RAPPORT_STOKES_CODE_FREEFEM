@@ -1,0 +1,104 @@
+/******************************************************************************
+      CAS TEST 2 : ÉQUATION DE STOKES SUR UN MAILLAGE CUBIQUE 3D
+              MÉTHODE DE RÉSOLUTION : PÉNALISATION
+*******************************************************************************/
+
+load "msh3"  // module de génération de maillage 3D
+load "medit"  // Module de sortie graphique en temps réel
+include "Cube.idp" // Module contenant la construction du maillage cubique 3D
+load "iovtk" //pour l'écriture au format .vtk
+// ofstream afile("CT2_pen_MER_p1bp1.txt");
+
+/*******************************************************************
+                  DÉFINITION DES ESPACES ET DES VARIABLES
+********************************************************************/
+
+//**********CONSTRUCTION DU MAILLAGE
+int nb=10; // Nombre de points par arete pour le maillage
+mesh3 Th=meshgen(nb); // Génération du maillage d'apres Cube.idp
+
+//*********ESPACES DE RÉSOLUTION
+fespace VVh(Th,[P1b,P1b,P1b]); // Espace pour la vitesse [u1,u2,u3]
+fespace QQh(Th,P1); // Espace pour la pression p
+  VVh [u1,u2,u3], [v1,v2,v3];
+  QQh p, q;
+
+//*********OPÉRATEURS ET VARIABLES UTILES
+macro Grad(u) [dx(u),dy(u),dz(u)] //
+macro div(u1,u2,u3) (dx(u1)+dy(u2)+dz(u3)) //
+
+real nu=1.0; // Viscosité dynamique
+
+
+//Définition des vitesses et pression analytiques pour le cas test
+func ue1=x;
+func ue2=y;
+func ue3=-2*z;
+func pe=x+y+z-(3./2.);
+
+//Définition du second membre de l'équation de Stokes
+func f=1.;
+
+
+/*******************************************************************
+                RÉSOLUTION DU PROBLÈME VARIATIONNEL
+********************************************************************/
+
+//*******VARIABLES DE RÉSOLUTION
+real t1,t2,pen;
+cout << "----------------------------" << endl;
+t1=clock(); // START CHRONO
+pen=1e-10; // Coefficient de pénalisation
+
+int dimk=0.5*(VVh.ndof+QQh.ndof); // Dimension de l'espace de KRYLOV pour GMRES
+int ite=2*dimk; // Nombre d'itérations pour le solveur
+
+//*******PROBLEME VARIATIONNEL
+solve Stokes([u1,u2,u3,p],[v1,v2,v3,q],solver=GMRES,eps=1e-10,dimKrylov=dimk,
+  nbiter=ite) =
+  // solve Stokes([u1,u2,u3,p],[v1,v2,v3,q],solver=UMFPACK)=
+  int3d(Th)( Grad(u1)'*Grad(v1) +  Grad(u2)'*Grad(v2) +  Grad(u3)'*Grad(v3)
+                  - div(u1,u2,u3)*q - div(v1,v2,v3)*p - pen*q*p )
+  +int3d(Th)(-f*(v1+v2+v3))
+  + on(1,2,3,4,5,6,u1=ue1,u2=ue2,u3=ue3,p=pe);
+
+  t2=clock(); // STOP CHRONO
+
+  /*******************************************************************
+                CALCUL DES ERREURS ET AFFICHAGE DES SORTIES
+  ********************************************************************/
+
+    real normeL2vit, errL2vit;
+    real normeL2press, errL2press;
+    //Pour la vitesse
+    normeL2vit =  sqrt( int3d(Th) ( (ue1)^2+(ue2)^2+(ue3)^2) );
+    errL2vit = sqrt( int3d(Th)  ( (u1-ue1)^2+(u2-ue2)^2+(u3-ue3)^2) );
+    //Pour la pression
+    normeL2press = sqrt( int3d(Th) ( (pe)^2 ));
+    errL2press = sqrt( int3d(Th) ( (p-pe)^2 ) );
+
+    //AFFICHAGE DES ERREURS À L'ECRAN
+    //afile << VVh.ndof+QQh.ndof << " " << pen << " "<<
+    //(errL2vit/normeL2vit+errL2press/normeL2press)*0.5 << " "<< t2-t1 <<  endl;
+    cout << "pour V" << VVh.ndof << endl;
+    cout << "pour P" << QQh.ndof << endl;
+    cout << "-----------------------" << endl;
+    cout << "ERR L2 RELATIVE VITESSE =" << errL2vit/normeL2vit << endl;
+    cout << "ERR L2 RELATIVE PRESSION =" << errL2press/normeL2press << endl;
+    cout << "Temps CPU :" << t2-t1 << endl;
+
+  //plot([ux,uz],value=true,cmm="cut y=1");
+
+
+  /********************************************************************
+            ÉCRITURE DES FICHIERS SOLUTIONS AU FORMAT VTK
+  ********************************************************************/
+  // int[int] Order = [1];
+  // string DataName = "Vitesse";
+  // savevtk("vit.vtk", Th,[u1,u2,u3], dataname=DataName, order=Order);
+  // DataName="Pression";
+  // savevtk("p.vtk", Th, p, dataname=DataName, order=Order);
+
+  //AFFICHAGE DES SOLUTIONS FINALES SUR LE MAILLAGE AVEC MEDIT
+  // medit("vit",Th,[u1,u2,u3]);
+  // medit("p",Th,p);
