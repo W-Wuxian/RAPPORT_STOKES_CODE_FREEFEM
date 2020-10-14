@@ -26,7 +26,7 @@
   - faire au clavier
       + m pour les couleurs
       + B (maj+b), puis G(maj+g) et A(maj+a) pour boxe grille  axe
-      = fn F1 pour une coupe
+      + fn F1 pour une coupe
 *****************************************************************************************
 ## LIRE ET MODIFIER LES SCRIPTS .plt (gnuplot) SI BESOIN.
 
